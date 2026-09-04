@@ -1,0 +1,4 @@
+build/
+compile_commands.json
+third_party/mini-wayland/
+/*.tar.gz
