@@ -6,6 +6,11 @@
 
 namespace mr {
 
+const Input& LessonParams::input() const noexcept {
+    static const Input kNothingPressed{};
+    return input_ptr != nullptr ? *input_ptr : kNothingPressed;
+}
+
 const char* to_string(Cadence cadence) noexcept {
     switch (cadence) {
         case Cadence::Static:

@@ -21,6 +21,20 @@
  * 算端点），**但那是在算端点，不在光栅化里** —— 线一旦有了两个
  * 整数端点，从那里到像素之间没有任何浮点。这条界线是这一课的重点，
  * 不要因为看见 `cos` 就以为算法用了浮点。
+ *
+ * ## 键盘
+ *
+ * 键来自**运行这个程序的那个终端**（通常是 ssh 会话）。板子上那套键鼠
+ * 连着板子自己的 tty，敲了这个程序收不到 —— 见 `mr/input.hpp` 开头。
+ *
+ *   space     暂停 / 继续
+ *   ←  →      调转速（含反转）
+ *   ↑  ↓      加 / 减辐条数
+ *   r         复位
+ *
+ * 屏幕左下角有一排刻度显示当前转速档位。这是**唯一的反馈通道** ——
+ * 人在 ssh 终端里，眼睛在板子的屏幕上，所以状态必须画在画面上，
+ * 打日志是看不见的（低头看终端就错过画面了）。
  */
 #include <cmath>
 
@@ -41,10 +55,10 @@ Pixel spoke_color(int index) noexcept {
                    static_cast<uint8_t>(128 + phase / 2));
 }
 
-void draw_wheel(const Surface& out, Point center, int32_t radius, double rotation) noexcept {
-    constexpr int kSpokes = 180;
-    for (int i = 0; i < kSpokes; ++i) {
-        const double angle = rotation + (2.0 * M_PI * i) / kSpokes;
+void draw_wheel(const Surface& out, Point center, int32_t radius, double rotation,
+                int spokes) noexcept {
+    for (int i = 0; i < spokes; ++i) {
+        const double angle = rotation + (2.0 * M_PI * i) / spokes;
 
         // 端点在这里算，用浮点。**光栅化不用。**
         const Point tip{center.x + static_cast<int32_t>(std::lround(std::cos(angle) * radius)),
@@ -69,7 +83,65 @@ void draw_edge_cases(const Surface& out, int32_t x0, int32_t y0, int32_t span) n
     draw_line(out, Point{x0, y0 + 40}, Point{x0 + span, y0 + 40 + span}, diagonal);
 }
 
+/// 左下角的一排刻度：当前转速档位。画在**画面上**而不是打日志，
+/// 因为操作者的眼睛在板子的屏幕上，不在终端里。
+void draw_speed_gauge(const Surface& out, int level, bool paused) noexcept {
+    const auto h = static_cast<int32_t>(out.height());
+    const int32_t base_y = h - 14;
+    const Pixel on = paused ? mr::rgb(200, 120, 60) : mr::rgb(120, 220, 120);
+    const Pixel off = mr::rgb(50, 50, 60);
+
+    for (int slot = 0; slot < 9; ++slot) {
+        const int32_t x = 16 + slot * 8;
+        const bool lit = (slot - 4) == level || (level > 0 && slot > 4 && slot - 4 <= level) ||
+                         (level < 0 && slot < 4 && slot - 4 >= level) || slot == 4;
+        draw_line(out, Point{x, base_y}, Point{x, base_y + 8}, lit ? on : off);
+    }
+}
+
+/// 跨帧状态。课是自由函数，所以状态只能放这里。
+///
+/// 目前只有一节课需要状态，所以**不**为此往 Lesson 结构体里加
+/// "创建/销毁上下文"那一套 —— 一个抽象在只有一个使用者时不要建。
+/// 第二节需要状态的课出现时再抽。
+double g_angle = 0.0;
+int g_speed_level = 1;
+int g_spokes = 180;
+bool g_paused = false;
+
+void handle_input(const mr::Input& in) noexcept {
+    if (in.pressed(mr::Key::Space)) {
+        g_paused = ! g_paused;
+    }
+    if (in.pressed(mr::Key::Right)) {
+        g_speed_level = g_speed_level < 4 ? g_speed_level + 1 : 4;
+    }
+    if (in.pressed(mr::Key::Left)) {
+        g_speed_level = g_speed_level > -4 ? g_speed_level - 1 : -4;
+    }
+    if (in.pressed(mr::Key::Up)) {
+        g_spokes = g_spokes < 720 ? g_spokes * 2 : 720;
+    }
+    if (in.pressed(mr::Key::Down)) {
+        g_spokes = g_spokes > 8 ? g_spokes / 2 : 8;
+    }
+    if (in.pressed(mr::key('r'))) {
+        g_angle = 0.0;
+        g_speed_level = 1;
+        g_spokes = 180;
+        g_paused = false;
+    }
+}
+
 void render(const Surface& out, const mr::LessonParams& params) {
+    handle_input(params.input());
+
+    if (! g_paused) {
+        // 用 dt 积分，不用 params.time_s —— 暂停之后再继续，
+        // 角度必须从停下的地方接着走，而不是跳到"如果一直转会到哪"。
+        g_angle += params.dt_s * 0.15 * g_speed_level;
+    }
+
     out.clear(mr::rgb(12, 12, 18));
 
     const auto w = static_cast<int32_t>(out.width());
@@ -77,12 +149,14 @@ void render(const Surface& out, const mr::LessonParams& params) {
 
     const Point center{w / 2, h / 2};
     const int32_t radius = (w < h ? w : h) / 2 - 20;
-    draw_wheel(out, center, radius > 8 ? radius : 8, params.time_s * 0.15);
+    draw_wheel(out, center, radius > 8 ? radius : 8, g_angle, g_spokes);
 
     draw_edge_cases(out, 16, 16, (w / 4) > 32 ? (w / 4) : 32);
 
     // 两个端点都在画布外，中间穿过屏幕。裁剪路径的验收。
     draw_line(out, Point{-w, h / 3}, Point{2 * w, h / 3 + h / 5}, mr::rgb(90, 90, 255));
+
+    draw_speed_gauge(out, g_speed_level, g_paused);
 }
 
 } // namespace

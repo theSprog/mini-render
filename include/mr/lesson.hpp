@@ -64,6 +64,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "mr/input.hpp"
 #include "mr/surface.hpp"
 
 namespace mr {
@@ -81,7 +82,31 @@ const char* to_string(Cadence cadence) noexcept;
 struct LessonParams {
     uint64_t frame = 0;   ///< 从 0 开始
     double time_s = 0.0;  ///< 第一帧以来的秒数
-    uint32_t seed = 0;    ///< 随机算法的种子。默认固定，让结果可复现
+
+    /**
+     * @brief 距上一帧的秒数
+     *
+     * 做**积分**（相机角度、粒子位置）必须用它，不能用 `time_s` 的差值
+     * 自己算，也不能假设它是 1/60 —— 帧率会因为算法开销、丢帧、
+     * offscreen 的 `--no-pace` 而变。用 dt 积分的动画在这三种情况下
+     * 速度都一致，用帧数递增的不会。
+     *
+     * 第一帧是 0。
+     */
+    double dt_s = 0.0;
+
+    uint32_t seed = 0;  ///< 随机算法的种子。默认固定，让结果可复现
+
+    /**
+     * @brief 本帧的按键状态。harness 拥有，课只读。
+     *
+     * 用 `input()` 取，不要直接碰这个指针 —— 单测里不接终端时它是空的。
+     */
+    const Input* input_ptr = nullptr;
+
+    /// 空指针时返回一个恒为"什么都没按"的 Input，
+    /// 所以用到输入的课在单测里也能直接调，不需要造一个假终端。
+    const Input& input() const noexcept;
 };
 
 using RenderFn = void (*)(const Surface&, const LessonParams&);

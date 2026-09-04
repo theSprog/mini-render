@@ -36,8 +36,10 @@
 #include <mw/internal/signal.hpp>
 #include <mw/version.hpp>
 
+#include "mr/input.hpp"
 #include "mr/lesson.hpp"
 #include "mr/surface.hpp"
+#include "mr/terminal.hpp"
 
 namespace {
 
@@ -45,6 +47,17 @@ volatile sig_atomic_t g_should_stop = 0;
 
 void on_signal(int /*signum*/) {
     g_should_stop = 1;
+}
+
+/// 崩溃路径。析构不会跑，所以在这里先把终端恢复回去 ——
+/// 否则 ssh 会话变成没有回显、没有行编辑的状态，
+/// 而那一刻你看不见自己在打什么（盲敲 `reset` 回车能修回来）。
+/// `MR_BUG` 在 debug 下会 abort，开发期撞上的概率不低。
+void on_fatal(int signum) {
+    mr::Terminal::restore_all();
+    // 恢复默认处置后重新发一次，保留 core dump 与原始退出码
+    ::signal(signum, SIG_DFL);
+    ::raise(signum);
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +81,7 @@ struct Env {
 
 struct Options {
     std::string command = "list";
+    bool no_input = false;
 
     /// `std::optional` 而不是 `std::string` —— parse_args 把非 optional 的
     /// positional 当作**必填**。写成 std::string 的话 `mini-render list`
@@ -156,10 +170,30 @@ int do_run(const Options& options, const Env& env) {
 
     // Static 的课画一次就定了，但仍然每帧调用：双缓冲下"只画了一块 buffer"
     // 是个很常见的 bug，每帧重画让这个可能性整个消失。开销可以忽略。
+    // 终端在 Screen 之后构造、之前析构。顺序无关紧要（两者不相干），
+    // 但放在这里是为了让 open 失败时根本不碰终端。
+    mr::Terminal terminal(! options.no_input);
+    mr::Input input;
+    LOG_INFO("{}", terminal.describe());
+    if (terminal.interactive()) {
+        LOG_INFO("keys: q/Esc quit, and whatever this lesson binds");
+    }
+
     const uint64_t limit = options.frames;
     const auto started = std::chrono::steady_clock::now();
+    double previous_s = 0.0;
 
     for (uint64_t i = 0; g_should_stop == 0 && (limit == 0 || i < limit); ++i) {
+        const double now_s =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        const auto now_ns = static_cast<uint64_t>(now_s * 1e9);
+
+        terminal.poll(input, now_ns);
+        if (input.quit_requested()) {
+            LOG_INFO("quit requested from the terminal");
+            break;
+        }
+
         auto frame = screen.begin_frame();
         if (! frame) {
             mw::log_error_object(frame.error(), "begin_frame");
@@ -168,9 +202,13 @@ int do_run(const Options& options, const Env& env) {
 
         mr::LessonParams params;
         params.frame = i;
-        params.time_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
-                            .count();
+        params.time_s = now_s;
+        // 第一帧 dt 为 0：那一帧没有"上一帧"，给一个猜出来的值
+        // （比如标称帧长）会让所有靠 dt 积分的东西在第一帧跳一下。
+        params.dt_s = (i == 0) ? 0.0 : (now_s - previous_s);
         params.seed = static_cast<uint32_t>(env.seed);
+        params.input_ptr = &input;
+        previous_s = now_s;
 
         lesson->render(surface_from(frame.value()), params);
 
@@ -190,6 +228,8 @@ int main(int argc, char** argv) {
     const auto signals = internal::sig::bind({
         {SIGINT, on_signal},
         {SIGTERM, on_signal},
+        {SIGSEGV, on_fatal},
+        {SIGABRT, on_fatal},
     });
 
     if (! mw::check_abi()) {
@@ -213,10 +253,13 @@ int main(int argc, char** argv) {
                       .bind(&Options::device, "-D", "--device", "KMS device node; empty = auto")
                       .bind(&Options::frames, "-f", "--frames", "frame count, 0 = until Ctrl+C")
                       .bind(&Options::no_pace, "--no-pace", "offscreen: do not sleep between frames")
+                      .bind(&Options::no_input, "--no-input", "do not put the terminal in raw mode")
                       .bind(&Options::help, "-h", "--help", "this text")
                       .example("mini-render list", "what is available")
                       .example("mini-render run 01 -f 300", "offscreen, no privileges needed")
                       .example("sudo mini-render run 01 -b kms", "real scanout, Ctrl+C to stop")
+                      .note("Keyboard control comes from this terminal, not from a keyboard "
+                            "plugged into the board. Press q or Esc to quit.")
                       .note("MR_DUMP_DIR=<dir> writes every frame as PPM. "
                             "MR_SEED=<n> seeds randomised lessons.");
 

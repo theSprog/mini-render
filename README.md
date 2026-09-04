@@ -22,6 +22,10 @@ make -j
 sudo ./build/debug/bin/mini-render run 01 -b kms   # 真上屏，Ctrl+C 停
 ```
 
+键盘来自**运行程序的那个终端**（通常是 ssh 会话）。板子上那套键鼠不参与 ——
+它连着板子自己的 tty，敲了这个程序收不到。`q` 或 `Esc` 退出。
+不需要交互时加 `--no-input`；stdin 不是 tty（管道、CI）时自动关掉。
+
 `offscreen` 是默认后端：不碰 DRM、不需要任何权限、开发机上直接跑。
 **但它验证不了显示链路的任何东西**（没有 stride 对齐、没有真 vblank），
 算法调完了要上真硬件跑一次。
@@ -49,6 +53,8 @@ make run LESSON=01 FRAMES=300
 include/mr/          算法与公共类型。lesson 只 include 这里
 ├── surface.hpp      可写像素平面 —— 与 mini-wayland 之间唯一的接缝
 ├── lesson.hpp       一节课的契约与注册宏
+├── input.hpp        一帧的按键状态；课只读这个
+├── terminal.hpp     stdin raw 模式与转义序列解码（只有 harness 用）
 ├── bug.hpp          MR_BUG：标记"只可能由实现错误到达"的分支
 └── raster/line.hpp  Bresenham
 src/                 实现；src/main.cpp 是全项目唯一的 main()
@@ -63,6 +69,8 @@ scripts/lint.sh         把约定变成构建期的硬失败
 | 课 | 年份 | 主题 |
 | --- | --- | --- |
 | `01-bresenham` | 1962 | 整数增量判别式画线；八卦限对称形式；平凡拒绝 |
+
+`01` 的键：`space` 暂停 / `←→` 调转速 / `↑↓` 加减辐条数 / `r` 复位。
 
 按年份读这些算法是有意义的：能看出整个领域怎么从"只用整数加减法"
 一步步走到"解渲染方程"。

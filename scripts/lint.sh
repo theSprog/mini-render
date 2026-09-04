@@ -75,6 +75,15 @@ forbid '\bsigaction\b|\bsignal[[:space:]]*\(' 'lessons/' \
 forbid '#include[[:space:]]*<mw/' 'lessons/ include/mr/' \
     'only src/main.cpp may include <mw/...>; lessons speak mr::Surface'
 
+# 输入：课拿到的是解码之后的 mr::Input，不该知道键是从终端来的。
+# Step 5 做出 mw/input/ 之后 harness 会换成从那边填同一个 Input ——
+# 课里但凡出现一句 read(STDIN) 或者 termios，那次替换就得改课。
+forbid 'mr/terminal\.hpp' 'lessons/' \
+    'a lesson must not touch the terminal; it receives a decoded mr::Input'
+
+forbid '\bSTDIN_FILENO\b|\btcsetattr\b|\btcgetattr\b|\bisatty\b|<termios\.h>' 'lessons/' \
+    'a lesson must not read stdin; the harness owns the terminal'
+
 forbid '\\033\[|\\x1b\[' 'lessons/ src/ include/' \
     'do not hand-write ANSI escapes; use internal::color'
 

@@ -130,7 +130,12 @@ MAIN_OBJ    := $(O)/src/main.o
 LIBCORE_OBJS := $(filter-out $(MAIN_OBJ),$(CORE_OBJS))
 
 BIN         := $(O)/bin/$(PROJECT)
-TEST_BIN    := $(O)/bin/$(PROJECT)-test
+
+# tests/ 下**每个 .cpp 一个可执行文件**，各自带自己的 main。
+# 合成一个的话要么共用一个 main（那就得维护一张注册表），
+# 要么链接冲突。分开还有个好处：某个测试挂了不影响别的跑完。
+TEST_NAMES  := $(patsubst tests/%.cpp,%,$(TEST_SRCS))
+TEST_BINS   := $(addprefix $(O)/bin/,$(TEST_NAMES))
 
 HEADERS     := $(wildcard include/mr/*.hpp) $(wildcard include/mr/*/*.hpp)
 ALL_SRCS    := $(CORE_SRCS) $(LESSON_SRCS) $(TEST_SRCS)
@@ -155,10 +160,13 @@ $(BIN): $(CORE_OBJS) $(LESSON_OBJS)
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-$(TEST_BIN): $(LIBCORE_OBJS) $(LESSON_OBJS) $(TEST_OBJS)
-	$(call say,LINK,$@)
-	$(Q)mkdir -p $(dir $@)
-	$(Q)$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+define TEST_RULE
+$(O)/bin/$(1): $(O)/tests/$(1).o $$(LIBCORE_OBJS) $$(LESSON_OBJS)
+	$$(call say,LINK,$$@)
+	$$(Q)mkdir -p $$(dir $$@)
+	$$(Q)$$(CXX) $$(LDFLAGS) -o $$@ $$^ $$(LDLIBS)
+endef
+$(foreach t,$(TEST_NAMES),$(eval $(call TEST_RULE,$(t))))
 
 $(O)/%.o: %.cpp
 	$(call say,CXX,$<)
@@ -189,8 +197,12 @@ check-headers:
 lint:
 	$(Q)./scripts/lint.sh
 
-test: $(TEST_BIN)
-	$(Q)$(TEST_BIN)
+test: $(TEST_BINS)
+	$(Q)fail=0; \
+	for t in $(TEST_BINS); do \
+		$$t || fail=1; \
+	done; \
+	exit $$fail
 
 check: check-headers lint test
 
