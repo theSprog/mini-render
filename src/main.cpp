@@ -71,8 +71,11 @@ struct Env {
     int seed = 0;
     bool no_color = false;
 
-    ENV_SCHEMA(ENV_FIELD(dump_dir, "MR_DUMP_DIR"), ENV_FIELD(seed, "MR_SEED"),
-               ENV_FIELD(no_color, "MR_NO_COLOR"))
+    ENV_SCHEMA(
+        ENV_FIELD(dump_dir, "MR_DUMP_DIR"), 
+        ENV_FIELD(seed,     "MR_SEED"),
+        ENV_FIELD(no_color, "MR_NO_COLOR")
+    )
 };
 
 // ---------------------------------------------------------------------------
@@ -263,18 +266,8 @@ int main(int argc, char** argv) {
                       .note("MR_DUMP_DIR=<dir> writes every frame as PPM. "
                             "MR_SEED=<n> seeds randomised lessons.");
 
-    auto parsed = parser.parse(argc, argv);
-    if (parsed && parsed.config.help) {
-        parser.print_help();
-        return 0;
-    }
-    if (! parsed) {
-        std::cerr << internal::color::red("error") << ": " << *parsed.error << "\n";
-        parser.print_help(std::cerr);
-        return 2;
-    }
+    auto options = parser.parse(argc, argv);
 
-    const Options& options = parsed.config;
     if (options.command == "list") {
         return do_list();
     }
@@ -286,7 +279,5 @@ int main(int argc, char** argv) {
         return do_run(options, *env);
     }
 
-    std::cerr << internal::color::red("error") << ": unknown command '" << options.command << "'\n";
-    parser.print_help(std::cerr);
     return 2;
 }

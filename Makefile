@@ -151,7 +151,7 @@ endif
 
 # ---------------------------------------------------------------------------
 
-.PHONY: all clean distclean check check-headers check-deps lint test run help
+.PHONY: all clean distclean check check-headers check-deps lint test run help compile_commands.json
 
 all: check-deps $(BIN)
 
@@ -193,6 +193,16 @@ check-headers:
 			-fsyntax-only $(O)/hdrchk/tu.cpp || fail=1; \
 	done; \
 	exit $$fail
+
+compile_commands.json:
+	$(Q)printf '[\n' > $@
+	$(Q)first=1; for s in $(ALL_SRCS); do \
+		if [ $$first -eq 0 ]; then printf ',\n' >> $@; fi; first=0; \
+		printf '  {"directory": "%s", "file": "%s", "command": "%s %s -c %s"}' \
+			"$(CURDIR)" "$$s" "$(CXX)" "$(CXXFLAGS)" "$$s" >> $@; \
+	done
+	$(Q)printf '\n]\n' >> $@
+	$(call say,GEN,$@)
 
 lint:
 	$(Q)./scripts/lint.sh
